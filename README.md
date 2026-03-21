@@ -2,41 +2,71 @@
 
 *A Zephyr RTOS port and enhancement of the original [Wake-on-LAN_ESP32](https://github.com/sergio-isidoro/Wake-on-LAN_ESP32)*
 
-This project provides a complete, robust, and asynchronous **Wake-on-LAN (WoL)** solution specifically tailored for the **ESP32-C3 SuperMini** using the native **Zephyr RTOS** network stack. 
-
-It autonomously connects to a specified Wi-Fi network, negotiates an IPv4 address via the DHCP client, and leverages the onboard **BOOT button** to broadcast a Magic Packet. This allows you to remotely wake up any target computer on your local network with a simple physical button press.
+This project provides a complete, robust, and asynchronous **Wake-on-LAN (WoL)** solution specifically tailored for the **ESP32-C3 SuperMini** using the native **Zephyr RTOS** network stack and a custom UI for 0.42" OLED displays.
 
 ---
 
 ## ✨ Key Features
 
-* **Zephyr RTOS Native:** Fully abandons the Arduino core in favor of Zephyr's native `net_mgmt` API, ensuring reliable, non-blocking network event handling (built for Zephyr v4.3+).
-* **Asynchronous Hardware Trigger:** Maps the onboard BOOT button (GPIO 9) via Zephyr's Devicetree and interrupts. The WoL packet dispatch is offloaded to system **Workqueues**, keeping the Interrupt Service Routine (ISR) clean and stable.
-* **Real-time Network Monitor:** Includes a background **ICMP (Ping) monitor** that tracks the target PC's status. It performs an initial burst of 3 pings to bypass ARP delays and then checks the status every minute.
-* **DHCP Client Integration:** Automatically fetches an IP address from your router and logs the network status and assigned IP directly to the serial console.
-* **Standard UDP Broadcast:** Constructs and transmits an industry-standard 102-byte Magic Packet over UDP port 9 to the limited broadcast address (`255.255.255.255`).
+* **Zephyr RTOS Native:** Built on Zephyr v4.3+, utilizing native `net_mgmt` and `net_icmp` APIs for reliable, non-blocking network handling.
+* **OLED Display UI (SSD1306):** Optimized for ultra-small **0.42" (72x40)** screens.
+    * **Partial Refresh Logic:** Only updates changed pixels to prevent flickering and save I2C bandwidth.
+    * **Smart IP Filtering:** Displays only the last two octets (e.g., `1.198`) to maximize readability on tiny screens.
+    * **Activity Animation:** Real-time refresh indicator (`>>>`) to show the system is alive.
+* **Dual Notification System (notify.c):** * **Visual LED Feedback:** Onboard Blue LED (GPIO 8) provides distinct patterns:
+        * **2 Blinks (500ms):** Magic Packet successfully sent.
+        * **1 Blink (500ms):** Target PC status changed (Online/Offline).
+* **Real-time Network Monitor:** Background **ICMP (Ping) monitor** tracks the target PC. It performs 3 initial attempts to handle ARP delays and then checks status every minute.
+* **Asynchronous Workqueues:** WoL packet dispatch and Ping checks are offloaded from the ISR to system workqueues, ensuring top-tier stability.
 
 ---
 
 ## 🛠️ Hardware Requirements
 
-* **Microcontroller:** ESP32-C3 SuperMini (or any compatible ESP32-C3 development board).
-* **Network Environment:** The ESP32-C3 must be connected via Wi-Fi to the *same local router/subnet* as the target computer.
-* **Target PC:** * Must be connected to the network via an **Ethernet cable** (Wake-on-LAN over Wi-Fi is rarely supported by standard motherboards).
-    * **Wake-on-LAN** must be explicitly enabled in both the Motherboard's **BIOS/UEFI** (often under "APM" or "Power Management" -> "Power On By PCI-E/Wake Up On LAN") and the Operating System's **Network Adapter properties**.
-    * **Firewall Note:** To allow the ESP32-C3 to detect the "ONLINE" status, ensure the target PC's firewall allows **ICMP Echo Requests (Ping)**.
+* **Microcontroller:** ESP32-C3 SuperMini.
+* **Display:** 0.42" OLED (SSD1306) connected via I2C (SDA: GPIO 5, SCL: GPIO 6).
+* **LED:** Internal Blue LED on **GPIO 8**.
+* **Button:** Onboard BOOT button on **GPIO 9**.
+* **Target PC:** Must support Wake-on-LAN via Ethernet and allow **ICMP Echo Requests (Ping)** through its firewall.
 
 ---
 
 ## 📂 Project Structure
 
-The project is organized into modular components for better maintainability:
+The project follows a clean, modular architecture:
 
-* `inc/`: Contains header files (`wifi.h`, `button.h`).
-* `src/wifi.c`: Handles Wi-Fi connection, DHCP events, ICMP Ping monitoring, and WoL packet generation.
-* `src/button.c`: Manages GPIO configuration and interrupt handling for the physical button.
-* `src/main.c`: The entry point that orchestrates the initialization of all modules.
+* `src/main.c`: Orchestrates the initialization of all subsystems.
+* `src/wifi.c`: Manages Wi-Fi connectivity, DHCP, ICMP Ping logic, and Magic Packet construction.
+* `src/display.c`: Handles the OLED UI, multithreaded rendering, and "Dirty-Check" refresh optimizations.
+* `src/notify.c`: Centralized module for LED patterns and UI synchronization.
+* `src/button.c`: GPIO interrupt handling for the physical trigger.
+* `app.overlay`: Devicetree definitions for the SSD1306 offset (28px) and GPIO mapping.
+
+---
+
+## 🚀 Quick Start
+
+1.  **Configure Network:** Edit `src/wifi.c` with your SSID, Password, and the Target PC's MAC/IP addresses.
+2.  **Build:**
+    ```bash
+    west build -p -b esp32c3_supermini .
+    ```
+3.  **Flash:**
+    ```bash
+    west flash
+    ```
+
+---
+
+## 🖥️ Display Layout
+
+| Line | Content | Description |
+| :--- | :--- | :--- |
+| **Top** | `>>>>>>>` | Dynamic activity/refresh animation. |
+| **Middle**| `1.198` | Filtered IP address (last two octets). |
+| **Bottom**| `ONLINE` | Target PC status (tracked via Ping). |
 
 ## Image
+![alt text](img/working.gif)
 ![alt text](img/memory.png)
 ![alt text](img/serial.png)

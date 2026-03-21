@@ -1,24 +1,19 @@
 #include "wifi.h"
-#include <zephyr/kernel.h>
-#include <zephyr/net/net_if.h>
-#include <zephyr/net/net_mgmt.h>
-#include <zephyr/net/wifi.h>
-#include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/net_core.h>
-#include <zephyr/net/net_ip.h>
-#include <zephyr/net/socket.h>
-#include <zephyr/net/icmp.h>
-#include <stdio.h>
-#include <string.h>
+#include "notify.h"
 
-#define SSID "wifi"             //Change to your Wi-Fi SSID
-#define PASSWORD "pass"         //Change to your Wi-Fi Password
+#define SSID        "WIFI"           // Change to your Wi-Fi SSID
+#define PASSWORD    "PASSWORD"       // Change to your Wi-Fi Password
 
-#define WOL_PORT 9
+#define WOL_PORT    9
 
-#define TARGET_IP "192.168.1.111"   // Target PC IP (Ensure Windows Firewall for status monitoring)
+#define TARGET_IP   "192.168.1.111"     // Target PC IP (Ensure Windows Firewall allows ICMP)
 
-static uint8_t target_mac[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};       //Replace with the MAC address of the target computer's network card
+/* Target MAC address to be woken up */
+static uint8_t target_mac[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}; 
+
+/* Global variables for UI/Display synchronization */
+char global_ip_str[INET_ADDRSTRLEN] = "";
+extern struct k_sem sem_ui_refresh;
 
 static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback ipv4_cb;
@@ -28,7 +23,7 @@ static struct k_work wol_work;
 static struct net_icmp_ctx ping_ctx;
 static struct k_work_delayable ping_work;
 static volatile bool target_is_online = false;
-static bool last_known_state = false;
+bool last_known_state = false;
 static bool first_ping_done = false;
 static uint16_t ping_seq = 0;
 static uint8_t ping_attempts = 0;
@@ -38,6 +33,7 @@ static void send_wol_worker(struct k_work *work) {
     uint8_t pkt[102];
     struct sockaddr_in dest;
     
+    /* Construct Magic Packet: 6 bytes of 0xFF followed by 16 repetitions of MAC */
     memset(pkt, 0xFF, 6);
     for (int i = 1; i <= 16; i++) {
         memcpy(&pkt[i * 6], target_mac, 6);
@@ -48,12 +44,13 @@ static void send_wol_worker(struct k_work *work) {
 
     dest.sin_family = AF_INET;
     dest.sin_port = htons(WOL_PORT);
-    dest.sin_addr.s_addr = 0xFFFFFFFF; 
+    dest.sin_addr.s_addr = 0xFFFFFFFF; /* Limited Broadcast */
 
     printf("Sending Magic Packet...\n");
     
     if (zsock_sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest)) > 0) {
         printf(">>> WoL Magic Packet Sent Successfully!\n");
+        notify_event(NOTIFY_WOL_SENT);
     } else {
         printf("Error: Failed to send WoL. Code: %d\n", errno);
     }
@@ -70,37 +67,46 @@ void trigger_wol(void) {
 static int ping_handler(struct net_icmp_ctx *ctx, struct net_pkt *pkt, 
                         struct net_icmp_ip_hdr *ip_hdr, struct net_icmp_hdr *icmp_hdr, 
                         void *user_data) {
-    target_is_online = true; /* We received a response from the PC! */
+    target_is_online = true; /* Echo Reply received! */
     return 0;
 }
 
 static void ping_worker_handler(struct k_work *work) {
-    /* 1. Avaliar o resultado do ping anterior (se houver) */
+    /* 1. Evaluate previous ping result (if any) */
     if (ping_attempts > 0) {
         if (target_is_online) {
-            /* SUCESSO! Interrompemos as tentativas */
+            /* SUCCESS! Target is reachable */
             if (!first_ping_done || !last_known_state) {
                 printf("\n[PING] Target PC (%s) is now ONLINE!\n", TARGET_IP);
                 last_known_state = true;
                 first_ping_done = true;
+                
+                /* Notify: Updates Display + 1 Blue LED blink (500ms) */
+                notify_event(NOTIFY_PING_UPDATE); 
             }
-            ping_attempts = 0; /* Reset para o próximo ciclo */
-            k_work_reschedule(&ping_work, K_MINUTES(1)); /* Espera 1 min */
+            
+            ping_attempts = 0; /* Reset counter for next cycle */
+            k_work_reschedule(&ping_work, K_MINUTES(1)); /* Wait 1 min for next check */
             return;
+            
         } else if (ping_attempts >= 3) {
-            /* FALHOU AS 3 TENTATIVAS! O PC está mesmo desligado */
+            /* FAILED ALL 3 ATTEMPTS! Target is considered offline */
             if (!first_ping_done || last_known_state) {
                 printf("\n[PING] Target PC (%s) is now OFFLINE.\n", TARGET_IP);
                 last_known_state = false;
                 first_ping_done = true;
+                
+                /* Notify: Updates Display + 1 Blue LED blink (500ms) */
+                notify_event(NOTIFY_PING_UPDATE);
             }
-            ping_attempts = 0; /* Reset para o próximo ciclo */
-            k_work_reschedule(&ping_work, K_MINUTES(1)); /* Espera 1 min */
+            
+            ping_attempts = 0; /* Reset counter for next cycle */
+            k_work_reschedule(&ping_work, K_MINUTES(1)); /* Wait 1 min for next check */
             return;
         }
     }
 
-    /* 2. Se chegámos aqui, precisamos de enviar um ping (Tentativa 1, 2 ou 3) */
+    /* 2. Prepare and send an Echo Request (Attempt 1, 2, or 3) */
     target_is_online = false;
     ping_attempts++;
 
@@ -115,14 +121,15 @@ static void ping_worker_handler(struct k_work *work) {
         .priority = 0,
     };
 
+    /* Send the ICMP packet via Zephyr network stack */
     net_icmp_send_echo_request(&ping_ctx, net_if_get_default(), 
                                (struct sockaddr *)&dest, &params, NULL);
 
-    /* Espera exatamente 1 segundo pela resposta antes de voltar a avaliar */
+    /* 3. Wait 1 second for a response before the next attempt or evaluation */
     k_work_reschedule(&ping_work, K_SECONDS(1));
 }
 
-/* --- NETWORK CALLBACKS (Fixed for Zephyr 4.3 - uint64_t) --- */
+/* --- NETWORK CALLBACKS --- */
 static void handle_wifi_events(struct net_mgmt_event_callback *cb, uint64_t mgmt_event, struct net_if *iface) {
     if (mgmt_event == NET_EVENT_WIFI_CONNECT_RESULT) {
         printf(">>> Router accepted the Wi-Fi connection!\n");
@@ -135,9 +142,8 @@ static void handle_ipv4_events(struct net_mgmt_event_callback *cb, uint64_t mgmt
     if (mgmt_event == NET_EVENT_IPV4_ADDR_ADD) {
         char ip_str[INET_ADDRSTRLEN];
         
-        /* Access the interface's IPv4 configuration to read the assigned IP */
+        /* Check if interface has a valid IPv4 address assigned via DHCP */
         if (iface->config.ip.ipv4) {
-            /* Zephyr can store multiple IPs, let's read the first valid one */
             for (int i = 0; i < NET_IF_MAX_IPV4_ADDR; i++) {
                 if (iface->config.ip.ipv4->unicast[i].ipv4.is_used) {
                     zsock_inet_ntop(AF_INET, 
@@ -152,10 +158,14 @@ static void handle_ipv4_events(struct net_mgmt_event_callback *cb, uint64_t mgmt
                 }
             }
         }
+
+        /* Copy IP to global string and notify Display thread */
+        strncpy(global_ip_str, ip_str, sizeof(global_ip_str));
+        k_sem_give(&sem_ui_refresh);
         
         printf("\nSystem is READY. Press the BOOT button to send the WoL packet.\n");
 
-        /* INSTRUÇÃO DE ARRANQUE: Começa a pingar imediatamente! */
+        /* STARTUP INSTRUCTION: Start monitoring immediately */
         k_work_reschedule(&ping_work, K_NO_WAIT);
     }
 }
@@ -179,11 +189,14 @@ static void connect_wifi(void) {
 }
 
 void wifi_init_and_connect(void) {
+    /* Initialize workers for WoL and Ping logic */
     k_work_init(&wol_work, send_wol_worker);
     k_work_init_delayable(&ping_work, ping_worker_handler);
     
+    /* Set up ICMP context for Echo Reply handling */
     net_icmp_init_ctx(&ping_ctx, AF_INET, NET_ICMPV4_ECHO_REPLY, 0, ping_handler);
 
+    /* Register Wi-Fi and IPv4 management event callbacks */
     net_mgmt_init_event_callback(&wifi_cb, handle_wifi_events, 
                                  NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
     net_mgmt_add_event_callback(&wifi_cb);

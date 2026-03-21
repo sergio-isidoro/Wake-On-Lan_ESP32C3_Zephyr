@@ -1,7 +1,10 @@
-#include "wifi.h"
-#include "button.h"
 #include <zephyr/kernel.h>
 #include <stdio.h>
+
+#include "notify.h"
+#include "wifi.h"
+#include "button.h"
+#include "display.h"
 
 int main(void) {
     printf("\n========================================\n");
@@ -11,14 +14,11 @@ int main(void) {
     /* Initialize the BOOT button hardware */
     button_init();
 
-    k_sleep(K_SECONDS(1));
+    /* Initialize Notify by LED */
+    notify_init();
     
     /* Initialize WoL worker and connect to Wi-Fi */
     wifi_init_and_connect();
-    
-    while (1) {
-        k_sleep(K_FOREVER);
-    }
     
     return 0;
 }
