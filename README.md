@@ -19,3 +19,7 @@ It autonomously connects to a specified Wi-Fi network, negotiates an IPv4 addres
 * **Network Environment:** The ESP32-C3 must be connected via Wi-Fi to the *same local router/subnet* as the target computer.
 * **Target PC:** * Must be connected to the network via an **Ethernet cable** (Wake-on-LAN over Wi-Fi is rarely supported by standard motherboards).
   * **Wake-on-LAN** must be explicitly enabled in both the Motherboard's BIOS/UEFI (often under "APM" or "Power Management" -> "Power On By PCI-E/Wake Up On LAN") and the Operating System's Network Adapter properties.
+
+## Image
+![alt text](img/memory.png)
+![alt text](img/serial.png)
