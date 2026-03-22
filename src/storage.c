@@ -2,9 +2,9 @@
 
 static struct nvs_fs fs;
 
-/* Use the 'nvs_storage' label defined in app.overlay to avoid redefinition errors */
-#define STORAGE_NODE DT_NODE_BY_FIXED_PARTITION_LABEL(nvs_storage)
-#define FLASH_NODE DT_MTD_FROM_FIXED_PARTITION(STORAGE_NODE)
+/* Usa a storage_partition definida pelo Espressif HAL em 0x3B0000 */
+#define STORAGE_NODE DT_NODE_BY_FIXED_PARTITION_LABEL(storage)
+#define FLASH_NODE   DT_MTD_FROM_FIXED_PARTITION(STORAGE_NODE)
 
 void storage_init(void) {
     int rc;
@@ -18,15 +18,15 @@ void storage_init(void) {
 
     fs.flash_device = flash_dev;
     fs.offset = DT_REG_ADDR(STORAGE_NODE);
-    
+
     rc = flash_get_page_info_by_offs(flash_dev, fs.offset, &info);
     if (rc) {
         printk("Error getting page info (%d)\n", rc);
         return;
     }
 
-    fs.sector_size = info.size;
-    fs.sector_count = 3; /* Reserve 3 sectors for NVS */
+    fs.sector_size  = info.size;
+    fs.sector_count = 3;
 
     rc = nvs_mount(&fs);
     if (rc) {

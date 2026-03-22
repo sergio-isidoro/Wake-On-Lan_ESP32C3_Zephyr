@@ -1,32 +1,34 @@
 #include "wifi.h"
 #include "notify.h"
 #include "storage.h"
-#include <zephyr/net/dhcpv4.h>
+#include "ota.h"
 
 #define WOL_PORT    9
 
 extern bool display_wifi_ready;
 extern struct k_sem sem_display_start;
+extern struct k_sem sem_display_ready;  /* aguarda display inicializado */
+extern struct k_sem sem_ota_trigger;    /* dispara verificação OTA */
 
 static bool wifi_connected = false;
 
-/* Configuration variables loaded from Flash */
+/* Variáveis de configuração carregadas da Flash */
 static char saved_ssid[32];
 static char saved_pass[64];
 static char saved_mac_str[18];
 static uint8_t target_mac_bin[6];
 char target_pc_ip[INET_ADDRSTRLEN] = "255.255.255.255";
 
-/* Global variables for UI/Display */
+/* Variáveis globais para UI/Display */
 char global_ip_str[INET_ADDRSTRLEN] = "";
 extern struct k_sem sem_ui_refresh;
 
 static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback ipv4_cb;
 static struct k_work wol_work;
-static struct k_work_delayable reconnect_work; /* reconnect via workqueue */
+static struct k_work_delayable reconnect_work;
 
-/* --- PING (ICMP) VARIABLES --- */
+/* --- PING (ICMP) --- */
 static struct net_icmp_ctx ping_ctx;
 static struct k_work_delayable ping_work;
 static volatile bool target_is_online = false;
@@ -43,7 +45,7 @@ static void parse_mac_address(const char *mac_str, uint8_t *mac_bin) {
     }
 }
 
-/* --- RECONNECT (worker — does not block the callback) --- */
+/* --- RECONNECT --- */
 static void reconnect_worker(struct k_work *work) {
     struct net_if *iface = net_if_get_default();
     struct wifi_connect_req_params params = {
@@ -158,7 +160,7 @@ static void handle_wifi_events(struct net_mgmt_event_callback *cb,
         printk("[WIFI] Connected!\n");
         net_dhcpv4_start(iface);
     }
-    
+
     if (mgmt_event == NET_EVENT_WIFI_DISCONNECT_RESULT) {
         if (!wifi_connected) return;
         wifi_connected = false;
@@ -183,8 +185,10 @@ static void handle_ipv4_events(struct net_mgmt_event_callback *cb,
                 zsock_inet_ntop(AF_INET,
                     &ipv4->unicast[i].ipv4.address.in_addr,
                     global_ip_str, sizeof(global_ip_str));
-                k_sem_give(&sem_ui_refresh); /* force immediate display refresh with new IP */
+                k_sem_give(&sem_ui_refresh);
                 k_work_reschedule(&ping_work, K_NO_WAIT);
+                /* Dispara verificação OTA após obter IP */
+                k_sem_give(&sem_ota_trigger);
                 break;
             }
         }
@@ -232,9 +236,17 @@ void wifi_init_and_connect(const char *ssid, const char *pass, const char *mac, 
         .band        = WIFI_FREQ_BAND_2_4_GHZ,
     };
 
-    /* Start display thread immediately — shows animation + "Waiting / WIFI" while connecting */
+    /* 1. Acorda a thread do display */
     k_sem_give(&sem_display_start);
 
+    /* 2. Aguarda confirmação que o display inicializou com sucesso.
+          Se o display falhar, esta linha bloqueia para sempre —
+          a main.c para de alimentar o WDT e o sistema reinicia. */
+    printk("[WIFI] Aguardando display...\n");
+    k_sem_take(&sem_display_ready, K_FOREVER);
+    printk("[WIFI] Display OK — iniciando ligação Wi-Fi.\n");
+
+    /* 3. Só agora começa o Wi-Fi */
     printf("[WIFI] Connecting to %s...\n", saved_ssid);
     net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params));
 }

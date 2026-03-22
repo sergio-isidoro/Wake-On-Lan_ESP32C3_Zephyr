@@ -4,38 +4,50 @@
 K_SEM_DEFINE(sem_ui_refresh, 0, 1);
 K_MUTEX_DEFINE(display_mutex);
 K_SEM_DEFINE(sem_display_start, 0, 1);
+K_SEM_DEFINE(sem_display_ready, 0, 1);  /* sinaliza ao wifi.c que o display está pronto */
 
 extern char global_ip_str[INET_ADDRSTRLEN];
 extern bool last_known_state;
 extern char target_pc_ip[INET_ADDRSTRLEN];
 
-bool display_ap_mode  = false;
-bool display_wifi_ready = false;
+bool display_ready         = false;  /* false = falhou; main.c para de alimentar o WDT */
+bool display_ap_mode       = false;
+bool display_wifi_ready    = false;
 bool display_station_ready = false;
-bool has_ip = false;
+bool has_ip                = false;
 
 void display_task_entry(void *p1, void *p2, void *p3) {
 
-    k_sem_take(&sem_display_start, K_FOREVER);
+    k_msleep(1000);
+
+    //k_sem_take(&sem_display_start, K_FOREVER);
 
     const struct device *disp = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 
+    /* Tenta até 3s — resolve o problema intermitente de timing do I2C */
     int retries = 30;
     while (!device_is_ready(disp) && retries-- > 0) {
         k_msleep(100);
     }
 
     if (!device_is_ready(disp)) {
-        printk("[DISPLAY] Device not ready — thread stopped.\n");
-        while (1) { k_sem_take(&sem_ui_refresh, K_FOREVER); }
+        printk("[DISPLAY] Device not ready — aguardando WDT reset.\n");
+        /* display_ready fica false  → main.c para de alimentar o WDT
+           sem_display_ready nunca é dado → wifi.c fica bloqueado em K_FOREVER
+           WDT expira em ~3s e reinicia automaticamente */
+        while (1) {
+            k_msleep(1000);
+        }
     }
 
-    k_mutex_lock(&display_mutex, K_FOREVER);
+    //k_mutex_lock(&display_mutex, K_FOREVER);
     int rc = cfb_framebuffer_init(disp);
     if (rc) {
-        printk("[DISPLAY] cfb_framebuffer_init failed: %d\n", rc);
+        printk("[DISPLAY] cfb_framebuffer_init failed: %d — aguardando WDT reset.\n", rc);
         k_mutex_unlock(&display_mutex);
-        while (1) { k_sem_take(&sem_ui_refresh, K_FOREVER); }
+        while (1) {
+            k_msleep(1000);
+        }
     }
     cfb_framebuffer_set_font(disp, 0);
     cfb_framebuffer_invert(disp);
@@ -44,15 +56,19 @@ void display_task_entry(void *p1, void *p2, void *p3) {
     uint8_t f_w, f_h;
     cfb_get_font_size(disp, 0, &f_w, &f_h);
 
-    /* Clear screen before turning display on — avoids showing leftover pixels */
+    /* Limpa o ecrã antes de ligar — evita pixels residuais */
     cfb_framebuffer_clear(disp, false);
     cfb_framebuffer_finalize(disp);
     display_blanking_off(disp);
     k_mutex_unlock(&display_mutex);
 
-    /* ---- AP MODE: static screen ---- */
+    /* Display inicializado com sucesso — sinaliza à main e ao wifi */
+    display_ready = true;
+    k_sem_give(&sem_display_ready);
+
+    /* ---- AP MODE: ecrã estático ---- */
     if (display_ap_mode) {
-        k_mutex_lock(&display_mutex, K_FOREVER);
+        //k_mutex_lock(&display_mutex, K_FOREVER);
 
         const char *line1 = "WOL_ESP";
         const char *line2 = "192.168";
@@ -69,22 +85,21 @@ void display_task_entry(void *p1, void *p2, void *p3) {
         cfb_framebuffer_finalize(disp);
         k_mutex_unlock(&display_mutex);
 
-        /* Signal that the display is initialized */
         display_wifi_ready = true;
 
         while (1) { k_sem_take(&sem_ui_refresh, K_FOREVER); }
     }
 
-    /* ---- STATION MODE: normal loop ---- */
+    /* ---- STATION MODE: loop normal ---- */
     static char prev_ip[INET_ADDRSTRLEN] = "";
     uint8_t anim_state = 0;
 
     while (1) {
         k_sem_take(&sem_ui_refresh, K_MSEC(25));
 
-        k_mutex_lock(&display_mutex, K_FOREVER);
+        //k_mutex_lock(&display_mutex, K_FOREVER);
 
-        /* 1. ANIMATION */
+        /* 1. ANIMAÇÃO */
         const char *arrows[] = {
             ">      ", ">>     ", ">>>    ", ">>>>   ",
             ">>>>>  ", ">>>>>> ", ">>>>>>>", " >>>>>>",
@@ -94,18 +109,17 @@ void display_task_entry(void *p1, void *p2, void *p3) {
         cfb_print(disp, arrows[anim_state], 0, 0);
         anim_state = (anim_state + 1) % 13;
 
-        /* 2. IP ADDRESS (or "Waiting" if not connected yet) */
+        /* 2. ENDEREÇO IP (ou "Waiting" enquanto não ligado) */
         has_ip = (strlen(global_ip_str) > 0 && strcmp(global_ip_str, "0.0.0.0") != 0);
 
         if (!has_ip) {
-            /* No IP yet — show waiting state on lines 2 and 3 */
             cfb_print(disp, "                ", 0, 12);
             cfb_print(disp, "Waiting", (screen_w - (7 * f_w)) / 2, 12);
             cfb_print(disp, "                ", 0, 26);
             cfb_print(disp, "WIFI", (screen_w - (4 * f_w)) / 2, 26);
-            prev_ip[0] = '\0'; /* reset so IP re-renders when it arrives */
+            prev_ip[0] = '\0';
         } else {
-            /* Connected — show last two octets of IP on line 2 */
+            /* Ligado — mostra os dois últimos octetos do IP */
             char *short_ip = global_ip_str;
             int dots = 0;
             for (char *p = global_ip_str; *p != '\0'; p++) {
@@ -126,7 +140,7 @@ void display_task_entry(void *p1, void *p2, void *p3) {
                 cfb_print(disp, prev_ip, (ip_x < 0) ? 0 : ip_x, 12);
             }
 
-            /* 3. TARGET PC IP on line 3 */
+            /* 3. IP DO PC ALVO */
             char *short_target = target_pc_ip;
             int tdots = 0;
             for (char *p = target_pc_ip; *p != '\0'; p++) {

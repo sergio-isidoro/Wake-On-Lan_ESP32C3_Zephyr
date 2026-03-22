@@ -7,6 +7,8 @@
 	chosen {
 		zephyr,display = &ssd1306;
 		zephyr,flash-controller = &flash;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,storage = &storage_partition;
 	};
 
 	cpus {
@@ -55,7 +57,7 @@
 
 &i2c0 {
 	status = "okay";
-	clock-frequency = <I2C_BITRATE_FAST>;
+	clock-frequency = <I2C_BITRATE_STANDARD>;
 
 	ssd1306: ssd1306@3c {
 		compatible = "solomon,ssd1306fb";
@@ -82,17 +84,4 @@
 			output-high;
 		};
 	};
-};
-
-&flash0 {
-    partitions {
-        compatible = "fixed-partitions";
-        #address-cells = <1>;
-        #size-cells = <1>;
-
-        nvs_storage: partition@3f0000 {
-		label = "nvs_storage";
-		reg = <0x3f0000 0x00010000>;
-	};
-    };
 };

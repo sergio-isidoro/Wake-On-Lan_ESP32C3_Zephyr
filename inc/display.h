@@ -11,14 +11,20 @@
 #include <stdbool.h>
 #include <zephyr/sys/reboot.h>
  
-/* Semaphore to start the display thread (given by wifi.c when IP is acquired) */
+/* Semáforo para arrancar a thread do display (dado por wifi.c / portal.c) */
 extern struct k_sem sem_display_start;
  
-/* Semaphore to force an immediate display refresh */
+/* Semáforo de confirmação: display inicializado com sucesso (dado por display.c) */
+extern struct k_sem sem_display_ready;
+ 
+/* Semáforo para forçar refresh imediato do display */
 extern struct k_sem sem_ui_refresh;
  
+/* true = display inicializou com sucesso
+   false = falhou — main.c para de alimentar o WDT e o sistema reinicia */
+extern bool display_ready;
+ 
 extern bool display_station_ready;
-
 extern bool has_ip;
  
 /* State flags */
