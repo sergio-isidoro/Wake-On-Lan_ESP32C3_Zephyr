@@ -83,8 +83,10 @@ void display_task_entry(void *p1, void *p2, void *p3) {
                 ">>>>>  ", ">>>>>> ", ">>>>>>>", " >>>>>>",
                 "  >>>>>", "   >>>>", "    >>>", "     >>", "      >"
             };
-            cfb_print(disp, "                ", 0, 0);
-            cfb_print(disp, arrows[anim_state], 0, 0);
+            int anim_w = 7 * f_w;
+            int anim_x = (screen_w - anim_w) / 2;
+            cfb_print(disp, "                ", anim_x, 0);
+            cfb_print(disp, arrows[anim_state], anim_x, 0);
             anim_state = (anim_state + 1) % 13;
 
             /* IP ADDRESS (or "Waiting" if not connected yet) */

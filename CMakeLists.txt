@@ -3,6 +3,9 @@
 # Define the minimum CMake version required by the Zephyr SDK
 cmake_minimum_required(VERSION 3.20.0)
 
+set(ESP_FLASH_BEFORE default_reset)
+set(ESP_FLASH_AFTER hard_reset)
+
 # Locate and load the Zephyr build system package
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 

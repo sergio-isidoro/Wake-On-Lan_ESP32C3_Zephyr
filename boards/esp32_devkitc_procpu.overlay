@@ -1,0 +1,109 @@
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	/* Manter os Aliases idênticos ao código C */
+	aliases {
+		sw0 = &user_button;
+		led0 = &blue_led;
+	};
+
+	chosen {
+		zephyr,display = &ssd1306;
+		zephyr,flash-controller = &flash;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "espressif,xtensa-lx6";
+			reg = <0>;
+			clock-frequency = <240000000>;
+		};
+
+		cpu1: cpu@1 {
+			device_type = "cpu";
+			compatible = "espressif,xtensa-lx6";
+			reg = <1>;
+			clock-frequency = <240000000>;
+		};
+	};
+
+	clock: clock {
+		compatible = "espressif,esp32-clock";
+		status = "okay";
+		#clock-cells = <1>;
+		fast-clk-src = <1>; 
+		slow-clk-src = <0>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		
+		blue_led: led_0 {
+			gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			label = "Blue LED";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		user_button: button_0 {
+			gpios = <&gpio0 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Boot Button";
+		};
+	};
+};
+
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&wdt1 { status = "okay"; };
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST_PLUS>;
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-names = "default";
+
+	ssd1306: ssd1306@3c {
+		compatible = "sinowealth,sh1106";
+		reg = <0x3c>;
+		width = <128>;
+		height = <64>;
+		segment-offset = <2>;
+		page-offset = <0>;
+		display-offset = <0>;
+		multiplex-ratio = <63>;
+		prechargep = <0xf1>;
+		ready-time-ms = <10>;
+		segment-remap;
+		com-invdir;
+	};
+};
+
+&pinctrl {
+	i2c0_default: i2c0_default {
+		group1 {
+			pinmux = <I2C0_SDA_GPIO21>, <I2C0_SCL_GPIO22>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		nvs_storage: partition@3f0000 {
+			label = "nvs_storage";
+			reg = <0x3f0000 0x00010000>;
+		};
+	};
+};
