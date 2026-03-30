@@ -8,14 +8,15 @@
 #include <stdbool.h>
 
 /**
- * @brief Initializes the BOOT button GPIO and its interrupts.
+ * @brief Initializes the BOOT button GPIO and its interrupt.
+ *        On press: triggers WoL via trigger_wol().
  */
 void button_init(void);
 
 /**
  * @brief Checks if the BOOT button is currently pressed.
  *
- * @return true if the button is pressed, false otherwise.
+ * @return true if pressed, false otherwise.
  */
 bool button_is_pressed(void);
 

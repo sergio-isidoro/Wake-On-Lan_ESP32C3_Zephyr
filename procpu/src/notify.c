@@ -1,14 +1,11 @@
 #include "notify.h"
 #include "display.h"
 
-/** @brief GPIO specification for the blue LED */
 static const struct gpio_dt_spec blue_led = GPIO_DT_SPEC_GET(DT_NODELABEL(blue_led), gpios);
 
-/* Semaphore and state for controlling the LED blinking pattern */
 static K_SEM_DEFINE(sem_blink, 0, 1);
 static int blink_count;
 
-/* --- BLINKING THREAD --- */
 static void blink_thread(void *p1, void *p2, void *p3) {
     while (1) {
         k_sem_take(&sem_blink, K_FOREVER);
@@ -33,9 +30,15 @@ void notify_init(void) {
 }
 
 void notify_event(notify_type_t type) {
+#ifdef CONFIG_SOC_ESP32
+    /* Dual-core: signal appcpu via shared memory flag */
+    display_notify_refresh();
+#else
+    /* Single-core: original semaphore */
     if (display_station_ready) {
         k_sem_give(&sem_ui_refresh);
     }
+#endif
 
     blink_count = (type == NOTIFY_WOL_SENT) ? 2 : 1;
     k_sem_give(&sem_blink);

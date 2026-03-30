@@ -1,6 +1,6 @@
 #include "storage.h"
 
-#define STORAGE_NODE DT_NODE_BY_FIXED_PARTITION_LABEL(nvs_storage)
+#define STORAGE_NODE DT_NODE_BY_FIXED_PARTITION_LABEL(storage)
 #define FLASH_NODE DT_MTD_FROM_FIXED_PARTITION(STORAGE_NODE)
 
 static struct nvs_fs fs;

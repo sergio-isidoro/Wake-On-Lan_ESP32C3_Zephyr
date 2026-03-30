@@ -14,19 +14,19 @@
 
 /**
  * @brief Starts the Captive Portal.
- * * This function performs the following steps:
- * 1. Enables WiFi Access Point mode (SSID: WOL_ESP).
+ *
+ * 1. Enables Wi-Fi Access Point mode (SSID: WOL_ESP).
  * 2. Sets a static IP (192.168.4.1).
- * 3. Starts the DNS redirector task to intercept all requests.
- * 4. Starts the HTTP server to serve the configuration form.
+ * 3. Starts the DNS redirector task (intercepts all DNS queries).
+ * 4. Starts the HTTP server (serves the configuration form).
+ *
+ * On ESP32 DevKitC (dual-core): also signals the appcpu display
+ * thread via shared memory before starting the AP.
  */
 void start_portal(void);
 
 /**
  * @brief Stops the Captive Portal and disables AP mode.
- * * This function performs the following steps:
- * 1. Disables WiFi Access Point mode.
- * 2. Resets the network interface to default state.
  */
 void stop_portal(void);
 

@@ -6,7 +6,6 @@
 
 static bool portal_active = false;
 
-/* --- HELPERS --- */
 static void send_all(int sock, const char *data, int len) {
     while (len > 0) {
         int sent = zsock_send(sock, data, len, 0);
@@ -71,17 +70,11 @@ static bool is_valid_mac(const char *mac) {
     return true;
 }
 
-/* --- HTTP SERVER --- */
 static void http_server_task(void *p1, void *p2, void *p3) {
-    while (!portal_active) {
-        k_msleep(100);
-    }
+    while (!portal_active) { k_msleep(100); }
 
     int server = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server < 0) {
-        printk("[HTTP] Error creating socket\n");
-        return;
-    }
+    if (server < 0) { return; }
 
     int opt = 1;
     zsock_setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -100,11 +93,9 @@ static void http_server_task(void *p1, void *p2, void *p3) {
         int client = zsock_accept(server, NULL, NULL);
         if (client < 0) continue;
 
-        int total = 0;
-        int content_length = 0;
+        int total = 0, content_length = 0;
         bool headers_done = false;
         char *body_start = NULL;
-
         memset(buf, 0, sizeof(buf));
 
         while (total < (int)sizeof(buf) - 1) {
@@ -123,21 +114,14 @@ static void http_server_task(void *p1, void *p2, void *p3) {
                     if (cl) content_length = atoi(cl + 15);
                 }
             }
-
             if (headers_done && content_length > 0) {
-                int body_received = total - (int)(body_start - buf);
-                if (body_received >= content_length) break;
-            } else if (headers_done && content_length == 0) {
+                if ((total - (int)(body_start - buf)) >= content_length) break;
+            } else if (headers_done) {
                 break;
             }
         }
 
-        if (!headers_done || !body_start) {
-            zsock_close(client);
-            continue;
-        }
-
-        printk("[HTTP] body: %s\n", body_start);
+        if (!headers_done || !body_start) { zsock_close(client); continue; }
 
         if (strncmp(buf, "POST /save", 10) == 0) {
             char raw_ssid[32]={0}, raw_pass[64]={0}, raw_mac[64]={0}, raw_ip[32]={0};
@@ -152,9 +136,6 @@ static void http_server_task(void *p1, void *p2, void *p3) {
             url_decode(pc_ip, raw_ip,   sizeof(pc_ip));
             url_decode(mac,   raw_mac,  sizeof(mac));
 
-            printk("[PORTAL] SSID='%s' IP='%s' MAC='%s'\n", ssid, pc_ip, mac);
-
-            /* Validate IP */
             struct in_addr tmp;
             bool ip_ok = (strlen(pc_ip) > 0 && zsock_inet_pton(AF_INET, pc_ip, &tmp) == 1);
 
@@ -168,31 +149,22 @@ static void http_server_task(void *p1, void *p2, void *p3) {
             send_all(client, html_ok, strlen(html_ok));
             k_msleep(200);
             zsock_close(client);
-
             notify_event(NOTIFY_WOL_SENT);
             k_msleep(1000);
             sys_reboot(SYS_REBOOT_COLD);
-
         } else {
             send_form(client, false);
         }
-
         zsock_close(client);
     }
 }
 K_THREAD_DEFINE(http_tid, 4096, http_server_task, NULL, NULL, NULL, 7, 0, 0);
 
-/* --- DHCP SERVER --- */
 static void dhcp_server_task(void *p1, void *p2, void *p3) {
-    while (!portal_active) {
-        k_msleep(100);
-    }
+    while (!portal_active) { k_msleep(100); }
 
     int sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        printk("[DHCP] Error creating socket\n");
-        return;
-    }
+    if (sock < 0) { return; }
 
     int opt = 1;
     zsock_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -214,25 +186,16 @@ static void dhcp_server_task(void *p1, void *p2, void *p3) {
 
         uint8_t reply[300];
         memset(reply, 0, sizeof(reply));
-
-        reply[0] = 2;
-        reply[1] = buf[1];
-        reply[2] = buf[2];
-        reply[3] = buf[3];
-        memcpy(&reply[4],  &buf[4], 4);
-        reply[10] = buf[10];
-        reply[11] = buf[11];
-
+        reply[0] = 2; reply[1] = buf[1]; reply[2] = buf[2]; reply[3] = buf[3];
+        memcpy(&reply[4], &buf[4], 4);
+        reply[10] = buf[10]; reply[11] = buf[11];
         reply[16] = 192; reply[17] = 168; reply[18] = 4; reply[19] = 2;
         reply[20] = 192; reply[21] = 168; reply[22] = 4; reply[23] = 1;
-
         memcpy(&reply[28], &buf[28], 6);
-
         reply[236] = 99; reply[237] = 130; reply[238] = 83; reply[239] = 99;
 
         int i = 240;
         uint8_t msg_type = (buf[242] == 1) ? 2 : 5;
-
         reply[i++] = 53; reply[i++] = 1; reply[i++] = msg_type;
         reply[i++] = 54; reply[i++] = 4;
         reply[i++] = 192; reply[i++] = 168; reply[i++] = 4; reply[i++] = 1;
@@ -252,22 +215,15 @@ static void dhcp_server_task(void *p1, void *p2, void *p3) {
             .sin_addr.s_addr = INADDR_BROADCAST,
         };
         zsock_sendto(sock, reply, i, 0, (struct sockaddr *)&dst, sizeof(dst));
-        printk("[DHCP] Offered 192.168.4.2\n");
     }
 }
 K_THREAD_DEFINE(dhcp_tid, 2048, dhcp_server_task, NULL, NULL, NULL, 7, 0, 0);
 
-/* --- DNS CAPTIVE PORTAL --- */
 static void dns_server_task(void *p1, void *p2, void *p3) {
-    while (!portal_active) {
-        k_msleep(100);
-    }
+    while (!portal_active) { k_msleep(100); }
 
     int sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        printk("[DNS] Error creating socket\n");
-        return;
-    }
+    if (sock < 0) { return; }
 
     struct sockaddr_in addr = {
         .sin_family      = AF_INET,
@@ -290,12 +246,15 @@ static void dns_server_task(void *p1, void *p2, void *p3) {
 }
 K_THREAD_DEFINE(dns_tid, 2048, dns_server_task, NULL, NULL, NULL, 8, 0, 0);
 
-/* --- START --- */
 void start_portal(void) {
+#ifdef CONFIG_SOC_ESP32
+    SHARED_STATE()->display_ap_mode = true;
+    display_notify_start();
+#else
     display_ap_mode = true;
+#endif
 
     struct net_if *iface = net_if_get_default();
-
     struct in_addr gw, mask, my_addr;
     zsock_inet_pton(AF_INET, "192.168.4.1", &my_addr);
     zsock_inet_pton(AF_INET, "192.168.4.1", &gw);
@@ -320,8 +279,5 @@ void start_portal(void) {
         return;
     }
     printk("[PORTAL] AP up: 192.168.4.1\n");
-
     portal_active = true;
-
-    k_sem_give(&sem_display_start);
 }

@@ -16,28 +16,31 @@
 #include <stdbool.h>
 
 /**
- * Global variables to hold network state and configuration.
- * These are defined in wifi.c and accessed by other modules as needed.
+ * Global variables — defined in wifi.c.
+ *
+ * On ESP32-C3 (single-core): accessed directly by display.c.
+ * On ESP32 DevKitC (dual-core): procpu-local only; display reads
+ * from shared memory via shared_mem.h instead.
  */
 extern char global_ip_str[INET_ADDRSTRLEN];
 extern bool last_known_state;
 extern char target_pc_ip[INET_ADDRSTRLEN];
- 
+
 /**
  * @brief Initializes the Wi-Fi stack and attempts to connect.
  *
- * @param ssid The Wi-Fi network name from Flash.
- * @param pass The Wi-Fi password from Flash.
- * @param mac  The target PC MAC address (string format "AA:BB:CC:DD:EE:FF").
- * @param pc_ip The target PC IP address (string format "192.168.1.100").
+ * @param ssid  The Wi-Fi network name from Flash.
+ * @param pass  The Wi-Fi password from Flash.
+ * @param mac   The target PC MAC address (string "AA:BB:CC:DD:EE:FF").
+ * @param pc_ip The target PC IP address (string "192.168.1.100").
  */
-void wifi_init_and_connect(const char *ssid, const char *pass, const char *mac, const char *pc_ip);
- 
+void wifi_init_and_connect(const char *ssid, const char *pass,
+                           const char *mac,  const char *pc_ip);
+
 /**
  * @brief Submits a Wake-on-LAN Magic Packet task to the system workqueue.
- *
- * This is called by the button interrupt handler in button.c.
+ *        Called by the button interrupt handler in button.c.
  */
 void trigger_wol(void);
- 
+
 #endif /* WIFI_H */
