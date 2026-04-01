@@ -4,6 +4,9 @@ A Zephyr RTOS application for the ESP32 DevKitC that sends Wake-on-LAN magic pac
 
 ---
 
+![Portal config form](assets/conecting.gif)
+![Portal config form](assets/sending_magic_packet.gif)
+
 ## Features
 
 - **Wake-on-LAN** — sends a UDP magic packet (port 9) to wake a target PC via its MAC address
