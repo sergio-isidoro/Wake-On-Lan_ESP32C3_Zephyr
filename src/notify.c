@@ -4,11 +4,9 @@
 /** @brief GPIO specification for the blue LED */
 static const struct gpio_dt_spec blue_led = GPIO_DT_SPEC_GET(DT_NODELABEL(blue_led), gpios);
 
-/* Semaphore and state for controlling the LED blinking pattern */
 static K_SEM_DEFINE(sem_blink, 0, 1);
 static int blink_count;
 
-/* --- BLINKING THREAD --- */
 static void blink_thread(void *p1, void *p2, void *p3) {
     while (1) {
         k_sem_take(&sem_blink, K_FOREVER);
@@ -34,6 +32,9 @@ void notify_init(void) {
 
 void notify_event(notify_type_t type) {
     if (display_station_ready) {
+        if (type == NOTIFY_WOL_SENT) {
+            k_sem_give(&sem_wol_sent);   /* triggers the 1 s on-screen message */
+        }
         k_sem_give(&sem_ui_refresh);
     }
 

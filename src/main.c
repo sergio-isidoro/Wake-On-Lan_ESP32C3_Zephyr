@@ -1,78 +1,97 @@
+/* SPDX-License-Identifier: Apache-2.0
+ *
+ * Wake On LAN — ESP32 DevKitC
+ * - Watchdog 5 s (MWDT via wdt1)
+ *
+ * Note: CONFIG_SMP / k_thread_cpu_pin are NOT used because WIFI_ESP32
+ * depends on (!SMP). The display thread runs at priority 7, Wi-Fi tasks
+ * at higher priority — the Zephyr scheduler handles interleaving.
+ */
+
 #include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/sys/reboot.h>
-#include <stdio.h>
+#include <zephyr/logging/log.h>
 
-#include "storage.h"
-#include "notify.h"
-#include "button.h"
-#include "wifi.h"
-#include "portal.h"
 #include "display.h"
+#include "storage.h"
+#include "wifi.h"
+#include "button.h"
+#include "notify.h"
+#include "portal.h"
 
-#define WDT_TIMEOUT_MS              1500        /* Watchdog timeout in milliseconds */
+LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
-int main(void) {
-    /* Short delay to allow system stabilization after boot */
-    k_msleep(100);
-    
-    /* Watchdog Timer Setup */
-    const struct device *wdt_dev = DEVICE_DT_GET(DT_NODELABEL(wdt1));
-    int wdt_channel = -1;                                                       // Will hold the channel ID if WDT is successfully initialized
+/* ── Watchdog ───────────────────────────────────────────────────────────────
+ * Timeout: 5 s.  A dedicated low-priority thread feeds every 2.5 s.
+ */
+#define WDT_TIMEOUT_MS  5000
 
-    /* Buffers for configuration data */
-    char ssid[32], pass[64], mac[18], pc_ip[INET_ADDRSTRLEN];
+static const struct device *wdt_dev = DEVICE_DT_GET(DT_NODELABEL(wdt1));
+static int wdt_channel_id;
 
-    /* Hardware and Subsystem Initialization */
-    storage_init();
+static void wdt_feed_thread(void *p1, void *p2, void *p3)
+{
+    while (1) {
+        wdt_feed(wdt_dev, wdt_channel_id);
+        k_msleep(WDT_TIMEOUT_MS / 2);
+    }
+}
+K_THREAD_DEFINE(wdt_tid, 512, wdt_feed_thread, NULL, NULL, NULL, 14, 0, 0);
+
+static void watchdog_init(void)
+{
+    if (!device_is_ready(wdt_dev)) {
+        LOG_ERR("WDT device not ready");
+        return;
+    }
+
+    struct wdt_timeout_cfg cfg = {
+        .window   = { .min = 0, .max = WDT_TIMEOUT_MS },
+        .callback = NULL,
+        .flags    = WDT_FLAG_RESET_SOC,
+    };
+
+    wdt_channel_id = wdt_install_timeout(wdt_dev, &cfg);
+    if (wdt_channel_id < 0) {
+        LOG_ERR("WDT install timeout failed: %d", wdt_channel_id);
+        return;
+    }
+
+    if (wdt_setup(wdt_dev, WDT_OPT_PAUSE_HALTED_BY_DBG) < 0) {
+        LOG_ERR("WDT setup failed");
+        return;
+    }
+
+    LOG_INF("WDT armed — timeout %d ms", WDT_TIMEOUT_MS);
+}
+
+/* ── main ───────────────────────────────────────────────────────────────── */
+int main(void)
+{
+    printk("\n=== Wake On LAN — ESP32 ===\n");
+
+    watchdog_init();
     notify_init();
     button_init();
+    storage_init();
 
-    /* Configure WDT with a timeout and set it to reset the SoC on expiry */
-    if (device_is_ready(wdt_dev)) {
-        struct wdt_timeout_cfg wdt_config = {.window.max = WDT_TIMEOUT_MS, .flags = WDT_FLAG_RESET_SOC};
-        wdt_channel = wdt_install_timeout(wdt_dev, &wdt_config);
-        wdt_setup(wdt_dev, WDT_OPT_PAUSE_HALTED_BY_DBG);
-    }
+    char ssid[32]               = {0};
+    char pass[64]               = {0};
+    char mac[18]                = {0};
+    char pc_ip[INET_ADDRSTRLEN] = {0};
 
-    /* Flow Decision */
-    int rc = storage_read_config(ssid, pass, mac, pc_ip);
-
-    if (rc == 0 && strlen(ssid) > 0 && strlen(mac) == 17) {
-        printf("[SYSTEM] Config loaded. Starting Station mode...\n");
-        wifi_init_and_connect(ssid, pass, mac, pc_ip);                  // This function will block until WiFi is connected and IP is obtained, then return to main loop
+    if (storage_read_config(ssid, pass, mac, pc_ip) == 0) {
+        LOG_INF("Credentials found — connecting to: %s", ssid);
+        wifi_init_and_connect(ssid, pass, mac, pc_ip);
     } else {
-        if (rc == 0) {
-            printf("[SYSTEM] Invalid config in Flash. Clearing...\n");
-            storage_clear_all();                                        // Clear invalid config to allow fresh start on next boot
-        }
-        printf("[SYSTEM] Starting Portal...\n");
-        start_portal();                                                 // This function will block and run the WiFi AP and configuration portal until the user completes setup, then it will reboot the system to apply the new config
+        LOG_INF("No credentials — starting captive portal");
+        start_portal();
     }
 
-    printf("\n--- Wake-on-LAN ESP32-C3 SuperMini ---\n");
-
-    /* Main Loop */
     while (1) {
-        
-        /* Check if no IP address */
-        if (!has_ip) {
-            /* Check for factory reset button press */
-            if (button_is_pressed()) {
-                printf("[SYSTEM] FACTORY RESET ACTIVATED!\n");
-                storage_clear_all();                                // Clear all stored configurations
-                notify_event(NOTIFY_WOL_SENT);                      // Notify user of reset (2 blinks)
-                k_msleep(1000);                                     // Wait a moment to ensure notification is seen
-                sys_reboot(SYS_REBOOT_COLD);                        // Reboot the system to start fresh
-            }
-        }
-
-        /* Feed the watchdog to prevent reset */
-        if (wdt_channel >= 0){
-            wdt_feed(wdt_dev, wdt_channel);
-        }
-
-        k_msleep(500);                                              // Sleep for a while before checking again
+        k_sleep(K_FOREVER);
     }
 
     return 0;

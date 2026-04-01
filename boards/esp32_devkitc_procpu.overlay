@@ -8,7 +8,7 @@
 	};
 
 	chosen {
-		zephyr,display = &ssd1306;
+		zephyr,display = &st7789v;
 		zephyr,flash-controller = &flash;
 	};
 
@@ -55,41 +55,65 @@
 			label = "Boot Button";
 		};
 	};
+
+	mipi_dbi_st7789v {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi3>;
+		dc-gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 17 GPIO_ACTIVE_LOW>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		st7789v: st7789v@0 {
+			compatible = "sitronix,st7789v";
+			mipi-max-frequency = <20000000>;
+			reg = <0>;
+			width = <240>;
+			height = <240>;
+			x-offset = <0>;
+			y-offset = <0>;
+
+			/* Parâmetros obrigatórios exigidos pelo Zephyr 4.3.0 */
+			vcom = <0x28>;
+			gctrl = <0x35>;
+			vrhs = <0x10>;
+			vdvs = <0x20>;
+			mdac = <0x08>;
+			gamma = <0x01>;
+			colmod = <0x55>;
+			lcm = <0x0C>;
+
+			/* Sequências de inicialização (Obrigatórias no binding atual) */
+			porch-param = [0c 0c 00 33 33];
+			cmd2en-param = [5a 69 02 01];
+			pwctrl1-param = [a4 a1];
+			pvgam-param = [d0 00 02 07 0a 28 32 44 42 06 0e 12 14 17];
+			nvgam-param = [d0 00 02 07 0a 28 31 54 47 0e 1c 17 1b 1e];
+			ram-param = [00 e0];
+			rgb-param = [cd 08 14];
+
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+		};
+	};
 };
 
 &gpio0 { status = "okay"; };
 &gpio1 { status = "okay"; };
 &wdt1 { status = "okay"; };
 
-&i2c0 {
+&spi3 {
 	status = "okay";
-	clock-frequency = <I2C_BITRATE_FAST_PLUS>;
-	pinctrl-0 = <&i2c0_default>;
+	pinctrl-0 = <&spim3_default>;
 	pinctrl-names = "default";
-
-	ssd1306: ssd1306@3c {
-		compatible = "sinowealth,sh1106";
-		reg = <0x3c>;
-		width = <128>;
-		height = <64>;
-		segment-offset = <2>;
-		page-offset = <0>;
-		display-offset = <0>;
-		multiplex-ratio = <63>;
-		prechargep = <0xf1>;
-		ready-time-ms = <10>;
-		segment-remap;
-		com-invdir;
-	};
 };
 
 &pinctrl {
-	i2c0_default: i2c0_default {
+	spim3_default: spim3_default {
 		group1 {
-			pinmux = <I2C0_SDA_GPIO21>, <I2C0_SCL_GPIO22>;
-			bias-pull-up;
-			drive-open-drain;
-			output-high;
+			pinmux = <0x001fffd2>,
+				 <0x0020ffd7>,
+				 <0x00227fc5>;
 		};
 	};
 };
