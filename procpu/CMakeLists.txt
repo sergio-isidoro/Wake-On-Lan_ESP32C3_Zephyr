@@ -1,16 +1,13 @@
 cmake_minimum_required(VERSION 3.20.0)
 
-# Explicitly set the procpu overlay file
-set(DTC_OVERLAY_FILE "${CMAKE_SOURCE_DIR}/procpu/esp32_devkitc_procpu.overlay")
-
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(wol_procpu)
 
-FILE(GLOB app_sources procpu/src/*.c)
+FILE(GLOB app_sources src/*.c)
 target_sources(app PRIVATE ${app_sources})
 
 target_include_directories(app PRIVATE
-    procpu/inc
-    shared
+    ${CMAKE_SOURCE_DIR}/inc
+    ${CMAKE_SOURCE_DIR}/../shared
 )
